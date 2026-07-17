@@ -1,0 +1,14 @@
+numpy==1.26.4
+opencv-python==4.8.0.76
+mediapipe==0.10.9
+torch==2.3.1
+pygame==2.5.2
+pyttsx3
+sounddevice
+vosk
+groq
+opencv-contrib-python==4.8.0.76
+sentence-transformers==2.6.1
+deepface
+tensorflow==2.15.0
+tf-keras

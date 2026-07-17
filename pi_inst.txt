@@ -1,0 +1,86 @@
+══════════════════════════════════════════════════════
+  Luna Robot — Raspberry Pi Setup Guide (Pi 4 & Pi 5)
+══════════════════════════════════════════════════════
+
+─── 1. System packages ───────────────────────────────
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y \
+    portaudio19-dev python3-pyaudio \
+    python3-opencv libatlas-base-dev \
+    libjasper-dev libhdf5-dev \
+    espeak espeak-data libespeak-dev
+
+─── 2. Python packages ───────────────────────────────
+pip install -r requirements.txt --break-system-packages
+
+  If mediapipe fails on Pi 4:
+    pip install mediapipe-rpi4 --break-system-packages
+
+  If mediapipe fails on Pi 5:
+    pip install mediapipe-rpi5 --break-system-packages
+
+─── 3. TensorFlow / DeepFace on Pi ──────────────────
+  Pi 4 (32-bit OS) — use tflite instead:
+    pip install tflite-runtime --break-system-packages
+    (DeepFace sad detection will be skipped gracefully)
+
+  Pi 4 / Pi 5 (64-bit OS — recommended):
+    pip install tensorflow==2.15.0 tf-keras deepface \
+        --break-system-packages
+
+─── 4. Pi 4 specific — increase swap ────────────────
+  TensorFlow needs more RAM than Pi 4 has free.
+  Edit /etc/dphys-swapfile:
+    CONF_SWAPSIZE=2048
+  Then:
+    sudo systemctl restart dphys-swapfile
+
+─── 5. GPU memory split ──────────────────────────────
+  Add to /boot/config.txt (Pi 4) or /boot/firmware/config.txt (Pi 5):
+    gpu_mem=128
+  This gives more RAM to the CPU for ML inference.
+
+─── 6. Performance settings ──────────────────────────
+  Pi 5 — enable performance governor:
+    echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+
+  Pi 4 — same command works, or use raspi-config > Performance
+
+─── 7. Disable unnecessary services ─────────────────
+  sudo systemctl disable bluetooth
+  sudo systemctl disable avahi-daemon
+  sudo systemctl disable triggerhappy
+
+─── 8. Run Luna ──────────────────────────────────────
+  python main.py
+
+  The new main.py auto-detects Pi 4 vs Pi 5 and sets:
+    Pi 5: vision@8fps, gesture@6fps, render@60fps, 4 torch threads
+    Pi 4: vision@5fps, gesture@4fps, render@30fps, 2 torch threads
+
+─── 9. Notes ─────────────────────────────────────────
+  • torch.set_num_threads() is now called automatically in main.py
+    based on Pi model — no manual edit needed.
+  • DeepFace warm-up happens at startup (first call is slow — expected).
+  • If Pi 4 is still sluggish, set RENDER_FPS=24 in config.py.
+  • Vosk model must be at: vosk-model-small-en-us-0.15/
+  • Emotion model must be at: models/emotion_raf_mobilenet_finetuned.pth
+
+
+
+
+  sudo apt update
+  sudo apt install python3.11 python3.11-venv python3.11-dev -y
+
+rm -rf venv
+
+python3.11 -m venv venv
+source venv/bin/activate
+
+which python
+which pip
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu

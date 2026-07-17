@@ -1,0 +1,29 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+
+# ── Secrets (never commit the real key) ──────────────────────────────────────
+.env
+
+# ── Large model weights — download separately, see README §4 ─────────────────
+vosk-model-small-en-us-0.15/
+models/emotion_raf_mobilenet_finetuned.pth
+
+# ── TTS scratch (Piper writes temp wavs) ─────────────────────────────────────
+*.wav
+
+# ── macOS metadata / junk ────────────────────────────────────────────────────
+.DS_Store
+._*
+
+# ── Editor / OS ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
