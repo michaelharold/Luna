@@ -929,7 +929,9 @@ class RobotFace:
             face_detected  = state.face_detected
             fx             = state.face_x
             fy             = state.face_y
-            speaking       = state.speaking
+            # audio_playing = real sound coming out right now (lip sync);
+            # state.speaking covers the whole TTS call incl. silent synth time
+            speaking       = state.audio_playing
             listening      = state.listening
             audio_energy   = state.audio_energy
             look_dir       = state.look_dir

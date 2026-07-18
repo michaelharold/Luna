@@ -15,6 +15,9 @@ class SharedState:
         "heard_text", "response",
         "speaking", "listening",
         "audio_energy",
+        "audio_playing",         # True only while real TTS audio is playing
+                                 # (drives lip sync; speaking stays True for the
+                                 # whole call so the mic stays blocked)
         "look_dir",
         "servo_action",
         "conversation_active",
@@ -44,6 +47,7 @@ class SharedState:
         self.speaking            = False
         self.listening           = False
         self.audio_energy        = 0.0
+        self.audio_playing       = False
         self.look_dir            = None
         self.servo_action        = None
         self.conversation_active = False

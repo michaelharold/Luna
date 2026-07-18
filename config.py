@@ -100,18 +100,29 @@ VOSK_SAMPLE_RATE = 16000    # vosk always needs 16000 — do not change
 # ── STT noise rejection (only respond when actually addressed) ─────────────────
 # Layered defence so ambient noise is never turned into words Luna answers.
 #
-# 1) Energy gate (VAD): audio blocks quieter than this RMS are treated as
+# 1) Energy gate (VAD): audio blocks quieter than the gate are treated as
 #    ambient noise and fed to Vosk as digital silence, so background sound is
-#    never transcribed. int16 scale (0–32767). Raise it if a noisy room still
-#    triggers Luna; lower it if a quiet/distant speaker gets ignored.
-#    To calibrate: watch the "[STT] rms=" debug lines — normal speech should
-#    sit well above this value, room noise well below it.
-MIC_ENERGY_THRESHOLD = 500.0
+#    never transcribed. The gate ADAPTS to the room: a slow-moving noise-floor
+#    estimate tracks ambient loudness, and the gate sits MIC_GATE_FACTOR above
+#    it — rising automatically in noisy rooms, falling in quiet ones.
+#    MIC_ENERGY_THRESHOLD is the minimum gate (int16 RMS scale, 0–32767).
+#    To calibrate: watch the "[STT] ... peak_rms=/gate=" debug lines — speech
+#    should sit well above the gate, room noise below it.
+MIC_ENERGY_THRESHOLD = 500.0    # gate never drops below this
+MIC_GATE_FACTOR      = 2.5      # gate = noise_floor × this (≥ threshold above)
+MIC_GATE_MAX         = 4000.0   # safety cap so speech can always get through
 
 # 2) Confidence gate: drop a recognised phrase whose average Vosk word
 #    confidence is below this (0.0–1.0). Filters low-confidence hallucinations
-#    that noise produces. Wake words bypass this so Luna can still be summoned.
+#    that noise produces.
 STT_CONFIDENCE_THRESHOLD = 0.55
+
+# Wake words are checked on their OWN confidence (not the whole phrase) so a
+# noise-hallucinated "luna" can't wake her, while a clearly spoken wake word
+# still cuts through a noisy room. Slightly-misheard wake words (e.g. Vosk
+# hearing "lunar") also wake her via fuzzy matching when heard confidently.
+WAKE_CONFIDENCE_THRESHOLD = 0.60
+WAKE_FUZZY_RATIO          = 0.80   # difflib similarity for near-miss wake words
 
 # 3) Minimum length: ignore stray single-character tokens ("a", "i", "o") that
 #    noise commonly yields. Real short answers ("yes"/"no"/"hi") still pass.

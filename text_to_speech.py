@@ -41,19 +41,28 @@ from config import (
 #
 # pyttsx3 was intentionally removed (see module docstring).
 #
-# Now:
+# Now (streaming — see piper_tts.py):
 #
-#   piper (render wav)  ->  TTS_PLAYER (paplay)
+#   piper --output_raw  ->  player (raw stdin)
 #        |
 #        v
-#   blocks until audio completes  ✅
+#   playback starts on the FIRST synthesised chunk (sub-second), and
+#   on_audio_start fires at that exact moment so lips + servo bob begin
+#   in sync with the sound — not seconds before it.
 #
 # ============================================================================
 
 
+def _on_audio_start():
+    """Called by piper_tts the instant real audio begins playing."""
+    with state.lock:
+        state.audio_playing = True
+    servo.talk_start()
+
+
 def _piper_speak(text):
 
-    tts.speak(text)
+    tts.speak(text, on_audio_start=_on_audio_start)
 
 # ============================================================================
 # Talking mouth energy animation
@@ -68,8 +77,10 @@ def _energy_loop():
 
     while True:
 
+        # Key the mouth on audio_playing (real sound), not speaking (the whole
+        # call incl. synth time) — lips no longer flap during silent synth.
         with state.lock:
-            speaking = state.speaking
+            speaking = state.audio_playing
 
         if speaking:
 
@@ -175,19 +186,10 @@ def speak(text, can_drop=False):
 
 
         # ------------------------------------------------------------
-        # Arm movement while Luna speaks
-        #
-        # A subtle up/down bob, driven directly by the speaking state inside
-        # servo_module — it runs only while Luna talks and stops the instant
-        # speech ends (no duration estimate, no leftover motion afterward).
-        # ------------------------------------------------------------
-
-        servo.talk_start()
-
-
-
-        # ------------------------------------------------------------
-        # ACTUAL SPEECH — Piper renders + plays, blocking until done
+        # ACTUAL SPEECH — Piper streams; playback starts on the first
+        # synthesised chunk. The talking servo bob and the mouth animation
+        # are both started from _on_audio_start() at the exact moment sound
+        # begins, so there's no silent lip-flap while Piper synthesises.
         # ------------------------------------------------------------
 
         speech_start = time.time()
@@ -209,6 +211,8 @@ def speak(text, can_drop=False):
 
 
             state.speaking = False
+
+            state.audio_playing = False
 
             state.audio_energy = 0.0
 

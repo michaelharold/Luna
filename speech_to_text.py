@@ -16,6 +16,7 @@ Improvements over the old version:
 import queue
 import json
 import time
+import difflib
 import threading
 import numpy as np
 import sounddevice as sd
@@ -32,9 +33,13 @@ from config import (
     POST_SPEAK_DELAY,
     DOUBLE_FLUSH,
     MIC_ENERGY_THRESHOLD,
+    MIC_GATE_FACTOR,
+    MIC_GATE_MAX,
     STT_CONFIDENCE_THRESHOLD,
     STT_MIN_UTTERANCE_CHARS,
     STT_DEBUG_AUDIO,
+    WAKE_CONFIDENCE_THRESHOLD,
+    WAKE_FUZZY_RATIO,
 )
 
 _model = Model(VOSK_MODEL_PATH)
@@ -207,6 +212,26 @@ def _block_rms(raw_bytes):
     return float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
 
 
+# ── Adaptive noise floor ──────────────────────────────────────────────────────
+# Tracks ambient room loudness so the energy gate follows the environment:
+# rises fast when the room gets quieter, creeps up slowly through loud stretches
+# (so bursts of real speech barely move it, but a persistently noisy room lifts
+# the gate above its noise). Classic asymmetric EMA.
+_noise_floor = 150.0
+
+
+def _update_noise_floor(rms):
+    global _noise_floor
+    alpha = 0.10 if rms < _noise_floor else 0.02
+    _noise_floor += alpha * (rms - _noise_floor)
+
+
+def _energy_gate():
+    """Current RMS gate: noise_floor × factor, clamped to [threshold, max]."""
+    return min(max(MIC_ENERGY_THRESHOLD, _noise_floor * MIC_GATE_FACTOR),
+               MIC_GATE_MAX)
+
+
 def _avg_confidence(result):
     """Mean Vosk per-word confidence for a final result (1.0 if unavailable)."""
     words = result.get("result", [])
@@ -223,19 +248,40 @@ def _flush_queue():
             break
 
 
-def _match_wake_word(text):
-    """Word-boundary wake word match. Returns cleaned text or None.
-    Longest wake phrase first, so "hey luna ..." strips the whole phrase
-    instead of leaving a stray "hey" in the question."""
-    words = text.split()
+def _find_wake_word(words):
+    """Locate a wake word/phrase in the token list.
+
+    Returns (start_index, n_tokens, exact) or None. Longest wake phrase is
+    tried first, so "hey luna ..." strips the whole phrase instead of leaving
+    a stray "hey" in the question. If no exact match, single-word wake words
+    (≥ 4 chars) are matched fuzzily so Vosk near-misses on poor capture
+    (e.g. "lunar" for "luna") still summon her — the caller applies a stricter
+    confidence bar to fuzzy hits so this never fires from noise."""
     for wake in sorted(WAKE_WORDS, key=lambda w: -len(w.split())):
         wake_parts = wake.split()
         n = len(wake_parts)
         for i in range(len(words) - n + 1):
             if words[i:i + n] == wake_parts:
-                cleaned = " ".join(words[:i] + words[i + n:]).strip()
-                return cleaned
+                return i, n, True
+
+    for wake in WAKE_WORDS:
+        if " " in wake or len(wake) < 4:
+            continue
+        for i, w in enumerate(words):
+            if (len(w) >= 4 and
+                    difflib.SequenceMatcher(None, w, wake).ratio()
+                    >= WAKE_FUZZY_RATIO):
+                return i, 1, False
     return None
+
+
+def _wake_confidence(result, words, start, n):
+    """Mean Vosk confidence of just the wake tokens (1.0 if unavailable)."""
+    infos = result.get("result", [])
+    if len(infos) != len(words):   # tokenisation mismatch — don't guess
+        return 1.0
+    confs = [w.get("conf", 1.0) for w in infos[start:start + n]]
+    return sum(confs) / len(confs) if confs else 1.0
 
 
 # ── Recognizer — created once, Reset() between turns (cheap on the Pi) ────────
@@ -349,12 +395,14 @@ def listen():
             continue
 
         # Energy gate (VAD): silence out ambient-level blocks so Vosk never
-        # transcribes background noise into words. Real speech sits well above
-        # this RMS; anything quieter is treated as room noise and fed as
-        # digital silence so utterances still get clean pauses/endpoints.
+        # transcribes background noise into words. The gate adapts to the
+        # room's noise floor (see _update_noise_floor) — rising in noisy rooms,
+        # falling in quiet ones. Gated blocks are fed as digital silence so
+        # utterances still get clean pauses/endpoints.
         rms = _block_rms(data)
+        _update_noise_floor(rms)
         utt_peak_rms = max(utt_peak_rms, rms)
-        if rms < MIC_ENERGY_THRESHOLD:
+        if rms < _energy_gate():
             data = bytes(len(data))
 
         if rec.AcceptWaveform(data):
@@ -378,17 +426,37 @@ def listen():
                     state.listening = active
                 continue   # keep listening — don't restart the whole cycle
 
-            cleaned = _match_wake_word(text)
+            words   = text.split()
+            wake    = _find_wake_word(words)
+            cleaned = None
 
-            # Noise gates — a wake word always bypasses them so Luna can still
-            # be summoned across a noisy room. Everything else must look like
-            # real, confident, addressed speech before it reaches the brain,
-            # so hallucinated noise-words are never answered.
+            # A wake word only counts when the wake tokens THEMSELVES were
+            # heard confidently — so noise hallucinated as "luna" never wakes
+            # her, but a clearly spoken wake word still cuts through a noisy
+            # room without needing the rest of the phrase to be clean.
+            # Fuzzy (misheard) wake words get a stricter bar than exact ones.
+            if wake is not None:
+                start, n, exact = wake
+                wake_conf = _wake_confidence(result, words, start, n)
+                need = (WAKE_CONFIDENCE_THRESHOLD if exact
+                        else max(WAKE_CONFIDENCE_THRESHOLD,
+                                 STT_CONFIDENCE_THRESHOLD))
+                if wake_conf >= need:
+                    cleaned = " ".join(words[:start] + words[start + n:]).strip()
+                else:
+                    if STT_DEBUG_AUDIO:
+                        print(f"[STT] Wake ignored (conf {wake_conf:.2f} < "
+                              f"{need:.2f}): \"{text}\"")
+                    wake = None
+
+            # Noise gates for everything that isn't a confident wake — must
+            # look like real, confident, addressed speech before it reaches
+            # the brain, so hallucinated noise-words are never answered.
             if cleaned is None:
                 conf = _avg_confidence(result)
                 if STT_DEBUG_AUDIO:
                     print(f"[STT] heard=\"{text}\" conf={conf:.2f} "
-                          f"peak_rms={peak_rms:.0f}")
+                          f"peak_rms={peak_rms:.0f} gate={_energy_gate():.0f}")
                 if (conf < STT_CONFIDENCE_THRESHOLD
                         or len(text) < STT_MIN_UTTERANCE_CHARS):
                     print(f"[STT] Dropped (noise): \"{text}\" conf={conf:.2f}")
