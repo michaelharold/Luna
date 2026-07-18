@@ -929,9 +929,15 @@ class RobotFace:
             face_detected  = state.face_detected
             fx             = state.face_x
             fy             = state.face_y
-            # audio_playing = real sound coming out right now (lip sync);
-            # state.speaking covers the whole TTS call incl. silent synth time
-            speaking       = state.audio_playing
+            # Two speech flags with different jobs:
+            #   speaking      — whole TTS call (incl. silent synth) → freezes
+            #                   emotion mimicking, blink cadence, eye sizing,
+            #                   so the face never flickers back to camera
+            #                   emotions in the gap before audio starts
+            #   audio_playing — real sound right now → drives ONLY the mouth,
+            #                   so lips move exactly with the audio
+            speaking       = state.speaking
+            audio_playing  = state.audio_playing
             listening      = state.listening
             audio_energy   = state.audio_energy
             look_dir       = state.look_dir
@@ -1236,7 +1242,7 @@ class RobotFace:
         self._happy       = happy
         self._sad         = sad
         self._listen      = is_listen
-        self._speaking    = speaking
+        self._speaking    = audio_playing   # mouth animates only with real sound
         self._emotion     = emotion
         self._audio_energy = audio_energy
 

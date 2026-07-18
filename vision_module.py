@@ -87,6 +87,16 @@ def _run_deepface(bgr_crop):
 
 
 def vision_loop():
+    while True:
+        try:
+            _vision_iteration_loop()
+        except Exception as e:
+            # never let a bad frame / model hiccup kill the vision thread
+            print(f"[vision] loop error (recovering): {e}")
+            time.sleep(1.0)
+
+
+def _vision_iteration_loop():
     global _df_counter
     sleep_time  = 1.0 / VISION_FPS
     target_size = (48, 48)
@@ -148,10 +158,11 @@ def vision_loop():
             face_cy = (y + h / 2) / frame.shape[0]
 
             with state.lock:
-                state.emotion       = emotion
-                state.face_detected = True
-                state.face_x        = face_cx
-                state.face_y        = face_cy
+                state.emotion        = emotion
+                state.face_detected  = True
+                state.face_x         = face_cx
+                state.face_y         = face_cy
+                state.last_face_time = time.time()   # addressed-speech gate
         else:
             _history.clear()
             with state.lock:

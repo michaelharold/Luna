@@ -103,6 +103,9 @@ class ServoController:
                 self._action_running = True
                 try:
                     action()
+                except Exception as e:
+                    # a bad move must never kill the servo worker thread
+                    print(f"[SERVO] action error (recovering): {e}")
                 finally:
                     self._action_running = False
             else:

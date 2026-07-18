@@ -71,23 +71,33 @@ def _is_self_echo(text):
 
 def voice_loop():
     while True:
-        text = listen()
         try:
-            if text == WAKE_ACK:
-                # wake word alone ("Luna!") — short acknowledgement
-                speak(random.choice(WAKE_REPLIES))
-            elif text:
-                if _is_self_echo(text):
-                    print(f"[Luna] Ignoring self-echo: \"{text}\"")
-                else:
-                    # speak() serializes internally — an answer is never
-                    # dropped, even if a gesture reaction is mid-sentence
-                    process(text)
-        finally:
-            # never leave the mode stuck on "processing" (e.g. empty input)
+            text = listen()
+            try:
+                if text == WAKE_ACK:
+                    # wake word alone ("Luna!") — short acknowledgement
+                    speak(random.choice(WAKE_REPLIES))
+                elif text:
+                    if _is_self_echo(text):
+                        print(f"[Luna] Ignoring self-echo: \"{text}\"")
+                    else:
+                        # speak() serializes internally — an answer is never
+                        # dropped, even if a gesture reaction is mid-sentence
+                        process(text)
+            finally:
+                # never leave the mode stuck on "processing" (e.g. empty input)
+                with state.lock:
+                    if not state.speaking and state.luna_mode == "processing":
+                        state.luna_mode = "idle"
+        except Exception as e:
+            # an unexpected error must never kill the voice thread — that
+            # would leave Luna permanently deaf until restart
+            print(f"[Luna] voice loop error (recovering): {e}")
             with state.lock:
-                if not state.speaking and state.luna_mode == "processing":
-                    state.luna_mode = "idle"
+                state.speaking  = False
+                state.listening = False
+                state.luna_mode = "idle"
+            time.sleep(1.0)
         time.sleep(0.05)
 
 

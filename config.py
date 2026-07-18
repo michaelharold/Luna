@@ -124,6 +124,16 @@ STT_CONFIDENCE_THRESHOLD = 0.55
 WAKE_CONFIDENCE_THRESHOLD = 0.60
 WAKE_FUZZY_RATIO          = 0.80   # difflib similarity for near-miss wake words
 
+# 3) Addressed-speech gate: people talking TO Luna face her; people talking to
+#    EACH OTHER in the room don't. Speech (wake words included — "hello"
+#    between two people greeting each other shouldn't wake her) is only
+#    accepted when the camera has seen a face within FACE_RECENT_SECS, so
+#    side conversations in any language no longer get random replies. The
+#    gate disables itself automatically when no camera is available, and
+#    can be turned off here for mic-only / dim-light setups.
+REQUIRE_FACE_TO_TALK = True
+FACE_RECENT_SECS     = 4.0   # tolerance for glancing away mid-question
+
 # 3) Minimum length: ignore stray single-character tokens ("a", "i", "o") that
 #    noise commonly yields. Real short answers ("yes"/"no"/"hi") still pass.
 STT_MIN_UTTERANCE_CHARS = 2

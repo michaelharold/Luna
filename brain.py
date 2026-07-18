@@ -32,29 +32,42 @@ questions      = []
 answers        = []
 knowledge_text = ""
 
-with open(KNOWLEDGE_PATH, "r") as f:
-    raw            = f.read()
-    knowledge_text = raw.strip()
-    for line in raw.splitlines():
-        if ":" not in line:
-            continue
-        q, a = line.split(":", 1)
-        questions.append(q.strip().lower())
-        answers.append(a.strip())
+try:
+    with open(KNOWLEDGE_PATH, "r") as f:
+        raw            = f.read()
+        knowledge_text = raw.strip()
+        for line in raw.splitlines():
+            if ":" not in line:
+                continue
+            q, a = line.split(":", 1)
+            questions.append(q.strip().lower())
+            answers.append(a.strip())
+except OSError as e:
+    # degrade gracefully — Luna still answers via Groq, offline fallback
+    # just says "I don't know" instead of crashing the whole app
+    print(f"[brain] Could not read {KNOWLEDGE_PATH} ({e}) — "
+          f"offline knowledge base disabled")
 
 # ── Local fallback — sentence transformer ─────────────────────────────────────
-print("[brain] Loading sentence transformer for offline fallback...")
-_st_model = SentenceTransformer("all-MiniLM-L6-v2")
+if questions:
+    print("[brain] Loading sentence transformer for offline fallback...")
+    _st_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-_raw   = _st_model.encode(questions, batch_size=32, show_progress_bar=False)
-_norms = np.linalg.norm(_raw, axis=1, keepdims=True)
-question_embeddings = _raw / np.maximum(_norms, 1e-9)
+    _raw   = _st_model.encode(questions, batch_size=32, show_progress_bar=False)
+    _norms = np.linalg.norm(_raw, axis=1, keepdims=True)
+    question_embeddings = _raw / np.maximum(_norms, 1e-9)
 
-print(f"[brain] {len(questions)} knowledge entries loaded")
+    print(f"[brain] {len(questions)} knowledge entries loaded")
+else:
+    _st_model           = None
+    question_embeddings = None
+    print("[brain] Knowledge base empty — offline fallback disabled")
 
 # ── Groq client ───────────────────────────────────────────────────────────────
 if GROQ_API_KEY:
-    _groq = Groq(api_key=GROQ_API_KEY)
+    # timeout: a network stall must never freeze Luna in "processing" —
+    # after 10s we fall back to the offline knowledge base instead.
+    _groq = Groq(api_key=GROQ_API_KEY, timeout=10.0, max_retries=1)
 else:
     _groq = None
     print("[brain] No GROQ_API_KEY set — running fully offline "
@@ -112,6 +125,8 @@ def _ask_groq(text):
 # ── Local fallback ────────────────────────────────────────────────────────────
 
 def _local_fallback(text):
+    if _st_model is None:
+        return "I am sorry, I cannot reach my brain right now. Please try again."
     q_vec  = _st_model.encode([text], batch_size=1, show_progress_bar=False)[0]
     q_norm = q_vec / max(float(np.linalg.norm(q_vec)), 1e-9)
 

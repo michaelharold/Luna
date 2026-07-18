@@ -40,6 +40,8 @@ from config import (
     STT_DEBUG_AUDIO,
     WAKE_CONFIDENCE_THRESHOLD,
     WAKE_FUZZY_RATIO,
+    REQUIRE_FACE_TO_TALK,
+    FACE_RECENT_SECS,
 )
 
 _model = Model(VOSK_MODEL_PATH)
@@ -298,6 +300,24 @@ def _get_recognizer():
     return _rec
 
 
+def _addressed_to_luna():
+    """True when the speech we just heard was plausibly directed AT Luna.
+
+    Uses the camera: someone talking to Luna faces her, so a face must have
+    been seen within FACE_RECENT_SECS. People chatting with each other in
+    front of Luna (any language) usually aren't facing her — their speech is
+    ignored instead of answered. Fails open when the camera is unavailable
+    (mic-only setups keep working) or the gate is disabled in config."""
+    if not REQUIRE_FACE_TO_TALK:
+        return True
+    with state.lock:
+        camera_ok = state.camera_ok
+        last_face = state.last_face_time
+    if not camera_ok:
+        return True
+    return (time.time() - last_face) <= FACE_RECENT_SECS
+
+
 def _expire_conversation():
     """Conversation window ran out — back to wake-word mode.
     Stamps convo_expired_time so the face can play its subtle 'rest' cue."""
@@ -468,6 +488,16 @@ def listen():
             print(f"[Luna heard] {text}")
 
             if cleaned is not None:
+                # Face gate applies to wake words too: "hello" said between
+                # two people greeting each other shouldn't wake Luna. Someone
+                # summoning her is in front of her camera (gate auto-disables
+                # when no camera is available).
+                if not _addressed_to_luna():
+                    print(f"[STT] Wake ignored (nobody facing me): \"{text}\"")
+                    with state.lock:
+                        state.luna_mode = "listening" if active else "idle"
+                        state.listening = active
+                    continue
                 print("[STT] Wake word — conversation active")
                 with state.lock:
                     state.conversation_active = True
@@ -475,6 +505,16 @@ def listen():
                 return cleaned if cleaned else WAKE_ACK
 
             if active:
+                # Addressed-speech gate: inside the conversation window, only
+                # answer speech from someone actually facing Luna — people
+                # talking among themselves in the room (any language) are
+                # ignored, and their chatter doesn't keep the window open.
+                if not _addressed_to_luna():
+                    print(f"[STT] Ignored (nobody facing me): \"{text}\"")
+                    with state.lock:
+                        state.luna_mode = "listening"
+                        state.listening = True
+                    continue
                 with state.lock:
                     state.last_activity_time = time.time()
                 return text

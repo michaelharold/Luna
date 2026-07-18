@@ -29,6 +29,8 @@ class SharedState:
         "face_override_until",   # time.time() when the override expires
         "mic_ok",                # False when no working microphone was found
         "camera_ok",             # False when no working camera was found
+        "last_face_time",        # time.time() a face was last seen (addressed-
+                                 # speech gate: people talking TO Luna face her)
         "last_spoken_text",      # Luna's most recent utterance (lowercased)
         "last_spoken_time",      # time.time() when that utterance finished
     )
@@ -59,6 +61,7 @@ class SharedState:
         self.face_override_until = 0.0
         self.mic_ok              = True
         self.camera_ok           = True
+        self.last_face_time      = 0.0
         self.last_spoken_text    = ""
         self.last_spoken_time    = 0.0
 

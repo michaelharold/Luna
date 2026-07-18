@@ -116,6 +116,16 @@ def _classify(landmarks):
 
 
 def gesture_loop():
+    while True:
+        try:
+            _gesture_iteration_loop()
+        except Exception as e:
+            # never let a bad frame / mediapipe hiccup kill the gesture thread
+            print(f"[gesture] loop error (recovering): {e}")
+            time.sleep(1.0)
+
+
+def _gesture_iteration_loop():
     sleep_time = 1.0 / GESTURE_FPS
 
     while True:

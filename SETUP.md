@@ -152,7 +152,8 @@ Open `config.py` and adjust only what applies to you:
 |---|---|
 | `AUDIO_INPUT_DEVICE` | Wrong mic picked. Find index: `python3 -c "import sounddevice as sd; print(sd.query_devices())"` |
 | `MIC_SAMPLE_RATE` | Recognition sounds off — pin your mic's native rate (else leave `None` to auto-detect). |
-| `MIC_ENERGY_THRESHOLD` | Noisy room triggers Luna → raise it; quiet speaker ignored → lower it. Watch the `[STT] … peak_rms=` logs to calibrate. |
+| `MIC_ENERGY_THRESHOLD` | Minimum energy gate (it also adapts to the room automatically). Noisy room triggers Luna → raise it; quiet speaker ignored → lower it. Watch the `[STT] … peak_rms=/gate=` logs to calibrate. |
+| `REQUIRE_FACE_TO_TALK` | Luna only answers people **facing her camera** (stops side conversations triggering her). Set `False` for mic-only or dim-light setups where face detection is unreliable. |
 | `CAMERA_ID` / `USE_ESP32_CAM` | Wrong camera, or using an ESP32 Wi-Fi cam (`ESP32_STREAM`). |
 | `ENABLE_SERVOS` | `True` only when servos are wired (Pi). Leave `False` for dev — you'll see `[SERVO] …` prints. |
 | `PIPER_PATH` / `PIPER_MODEL` / `TTS_PLAYER` | Piper installed somewhere other than the defaults (see step 4c). |
@@ -194,7 +195,8 @@ Luna is built to **degrade gracefully** — a missing mic/camera/speaker/model n
 |---|---|
 | `ModuleNotFoundError` on startup | venv not active, or `pip install -r requirements.txt` didn't finish. Re-check step 2–3. |
 | `[STT] NO MICROPHONE FOUND` | Set `AUDIO_INPUT_DEVICE` in `config.py` (step 6). Pi: `sudo usermod -aG audio $USER` then reboot. |
-| Hears random words / talks to noise | Raise `MIC_ENERGY_THRESHOLD` (and/or `STT_CONFIDENCE_THRESHOLD`) in `config.py`; watch `[STT] … peak_rms=` to calibrate. |
+| Hears random words / talks to noise | Raise `MIC_ENERGY_THRESHOLD` (and/or `STT_CONFIDENCE_THRESHOLD`) in `config.py`; watch `[STT] … peak_rms=/gate=` to calibrate. Side conversations are already ignored via the face gate (`REQUIRE_FACE_TO_TALK`). |
+| Luna ignores you (`[STT] … nobody facing me` in logs) | You're not in front of the camera, or the light is too dim for face detection. Face her camera, improve lighting, or set `REQUIRE_FACE_TO_TALK = False`. |
 | `[Piper] error: …`, no voice (text shows) | Piper not installed/configured — redo step 4c, check `PIPER_PATH`/`PIPER_MODEL` exist and `which paplay`. |
 | `[vision] Emotion model unavailable …` | You skipped step 4b. Face tracking still works; emotion stays Neutral until you add the weights. |
 | `[camera] NO CAMERA FOUND` | Set `CAMERA_ID`, or grant camera permission (macOS/Windows), or enable the Pi camera in `raspi-config`. |

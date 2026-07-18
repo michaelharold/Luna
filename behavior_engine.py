@@ -9,9 +9,11 @@ Point      → eyes follow direction (handled in robot_face via look_dir)
 
 Interrupt rules (order matters — answering ALWAYS wins):
   • Luna speaking or processing an answer  → gestures ignored completely
-  • Conversation window active (attentive) → face + servo only, no speech,
-    so a wave never talks over the user's next question
-  • Fully idle                             → full reaction with speech
+  • Conversation window active (attentive) → face reaction ONLY — no speech
+    (would talk over the user) and no servo motion (the user's natural hand
+    movements while talking easily read as gestures; moving arms mid-question
+    is distracting and adds mic noise)
+  • Fully idle                             → full reaction with speech + servo
 """
 
 import threading
@@ -43,48 +45,63 @@ def behavior_loop():
     from text_to_speech import speak   # deferred — avoids circular import
 
     while True:
-        with state.lock:
-            gesture = state.gesture
-            busy    = state.speaking or state.luna_mode in ("processing",
-                                                            "speaking")
-            in_convo = state.conversation_active
-
-        if not busy:
-            # in an active conversation react silently (face + servo only)
-            quiet = in_convo
-
-            if gesture == "WAVE" and _cooled("WAVE"):
-                _set_face("happy")
-                servo.wave()
-                if not quiet:
-                    speak("Hi there! I am " + ROBOT_NAME, can_drop=True)
-
-            elif gesture == "THUMBS_UP" and _cooled("THUMBS_UP"):
-                _set_face("excited")
-                servo.arms_up()
-                if not quiet:
-                    speak("Thank you! You are awesome!", can_drop=True)
-
-            elif gesture == "PEACE" and _cooled("PEACE"):
-                _set_face("excited")
-                servo.arm_up("right")
-                if not quiet:
-                    speak("Peace!", can_drop=True)
-
-            elif gesture == "OPEN_PALM" and _cooled("OPEN_PALM"):
-                # friendly acknowledgement — happy face + a little wave
-                _set_face("happy")
-                servo.wave()
-
-            # HEAD DISABLED FOR NOW — hands only. Re-enable to make Luna
-            # turn her head toward a pointed direction.
-            # elif gesture == "POINT_LEFT" and _cooled("POINT_LEFT"):
-            #     servo.head_look("left")
-            #
-            # elif gesture == "POINT_RIGHT" and _cooled("POINT_RIGHT"):
-            #     servo.head_look("right")
-
+        try:
+            _behavior_step(speak)
+        except Exception as e:
+            # a reaction error must never kill the behavior thread
+            print(f"[behavior] loop error (recovering): {e}")
+            time.sleep(1.0)
         time.sleep(0.2)
+
+
+def _behavior_step(speak):
+    with state.lock:
+        gesture = state.gesture
+        busy    = state.speaking or state.luna_mode in ("processing",
+                                                        "speaking")
+        in_convo = state.conversation_active
+
+    if busy:
+        return
+
+    # In an active conversation the user is (or is about to be) mid-question —
+    # their natural hand movements while talking easily read as WAVE/PEACE.
+    # React with the FACE only: no speech (would talk over them) and no servo
+    # motion (arm noise/motion mid-question is distracting and can leak into
+    # the mic). Full reactions only when Luna is fully idle.
+    quiet = in_convo
+
+    if gesture == "WAVE" and _cooled("WAVE"):
+        _set_face("happy")
+        if not quiet:
+            servo.wave()
+            speak("Hi there! I am " + ROBOT_NAME, can_drop=True)
+
+    elif gesture == "THUMBS_UP" and _cooled("THUMBS_UP"):
+        _set_face("excited")
+        if not quiet:
+            servo.arms_up()
+            speak("Thank you! You are awesome!", can_drop=True)
+
+    elif gesture == "PEACE" and _cooled("PEACE"):
+        _set_face("excited")
+        if not quiet:
+            servo.arm_up("right")
+            speak("Peace!", can_drop=True)
+
+    elif gesture == "OPEN_PALM" and _cooled("OPEN_PALM"):
+        # friendly acknowledgement — happy face + a little wave
+        _set_face("happy")
+        if not quiet:
+            servo.wave()
+
+    # HEAD DISABLED FOR NOW — hands only. Re-enable to make Luna
+    # turn her head toward a pointed direction.
+    # elif gesture == "POINT_LEFT" and _cooled("POINT_LEFT"):
+    #     servo.head_look("left")
+    #
+    # elif gesture == "POINT_RIGHT" and _cooled("POINT_RIGHT"):
+    #     servo.head_look("right")
 
 
 def start_behavior():
