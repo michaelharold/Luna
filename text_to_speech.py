@@ -2,28 +2,21 @@
 """
 text_to_speech.py — Luna TTS system
 
-CHANGES:
-========
-1. Disabled pyttsx3 on Linux.
-   Reason:
-   - pyttsx3 returns from runAndWait() immediately on Debian 13 + PipeWire.
-   - Audio does not reliably reach Bluetooth A2DP devices.
-   - This caused:
-       "[TTS] engine returned early (0.0s...)"
+Voice output is produced by **Piper** (offline neural TTS) via piper_tts.py:
+Piper renders the text to a wav, then TTS_PLAYER (paplay) plays it. See the
+README "Piper voice (TTS)" section for install/config.
 
-2. Replaced Linux speech output with espeak-ng.
-   Reason:
-   - espeak-ng blocks until speech finishes.
-   - Works correctly with PipeWire.
-   - Automatically follows the system default output
-     (Bluetooth earbuds, HDMI, etc.).
+Why Piper (and why pyttsx3 was removed):
+  - pyttsx3 returned from runAndWait() immediately on Debian 13 + PipeWire, so
+    Luna "finished" speaking before the audio played — the mic opened early and
+    echo protection failed ("[TTS] engine returned early (0.0s...)").
+  - Piper's player subprocess blocks until playback actually completes, which
+    keeps the mic-blocking + echo protection correct.
 
-3. Kept Luna's existing:
-   - speaking state lock
-   - microphone blocking
-   - echo protection
-   - talking animation
-   - servo movement
+Everything around the engine is unchanged:
+  - speaking state lock          - talking mouth animation
+  - microphone blocking          - talking servo bob
+  - echo protection
 """
 
 import sys
@@ -46,29 +39,14 @@ from config import (
 # TTS ENGINE
 # ============================================================================
 #
-# pyttsx3 was intentionally removed.
-#
-# Previously:
-#
-#   pyttsx3.say()
-#        |
-#        v
-#   runAndWait()
-#        |
-#        v
-#   returns immediately ❌
-#
-# Result:
-# Luna thought she finished speaking,
-# microphone opened,
-# echo protection failed.
+# pyttsx3 was intentionally removed (see module docstring).
 #
 # Now:
 #
-#   espeak-ng subprocess
+#   piper (render wav)  ->  TTS_PLAYER (paplay)
 #        |
 #        v
-#   waits until audio completes ✅
+#   blocks until audio completes  ✅
 #
 # ============================================================================
 
@@ -209,11 +187,7 @@ def speak(text, can_drop=False):
 
 
         # ------------------------------------------------------------
-        # ACTUAL SPEECH
-        #
-        # Changed:
-        # pyttsx3 removed
-        # espeak-ng used instead
+        # ACTUAL SPEECH — Piper renders + plays, blocking until done
         # ------------------------------------------------------------
 
         speech_start = time.time()
@@ -244,7 +218,7 @@ def speak(text, can_drop=False):
 
 
 
-            # Since espeak-ng blocks correctly,
+            # Since Piper's player blocks until playback finishes,
             # only normal echo protection is needed.
             state.mic_unblock_time = (
                 time.time()

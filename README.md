@@ -6,10 +6,12 @@ Luna is a friendly desktop/college robot assistant that runs on a Raspberry Pi (
 - **Understands gestures** — wave, thumbs-up 👍, peace ✌, open palm, pointing (MediaPipe hands)
 - **Listens** — offline speech recognition (Vosk), wake words: *"hello"*, *"luna"*, *"hey luna"*
 - **Thinks** — Groq LLM (llama-3.3-70b) with a local knowledge-base fallback that works fully offline
-- **Speaks** — pyttsx3 / espeak / macOS `say`, with an animated talking mouth that never gets talked over or skipped
+- **Speaks** — Piper neural TTS (fully offline), with an animated talking mouth that never gets talked over or skipped
 - **Feels** — an expressive animated face (happy, sad, angry, surprised, sleeping, excited ✨, love 💕), in **two selectable styles**
-- **Moves** — head-pan + two arm servos (wave, nod, arms up, talking sway)
+- **Moves** — two arm servos (wave, arms-up, gesture reactions, and a subtle up/down bob while talking); optional head-pan servo (currently disabled in code)
 
+> **New here?** [**SETUP.md**](SETUP.md) is a linear clone → install → run → troubleshoot walkthrough. This README is the full reference.
+>
 > Changes to the project are logged in [UPDATES.txt](UPDATES.txt).
 
 ---
@@ -52,7 +54,8 @@ Luna is a friendly desktop/college robot assistant that runs on a Raspberry Pi (
 | `behavior_engine.py` | Reacts to gestures (face + voice + servos) — never interrupts Luna mid-answer |
 | `speech_to_text.py` | Vosk STT, wake words, mic auto-detect, conversation-timeout handling |
 | `brain.py` | Groq LLM + offline knowledge base (`data/knowledge.txt`) |
-| `text_to_speech.py` | TTS + talking-mouth energy animation, serialized so answers are never dropped |
+| `text_to_speech.py` | Speech orchestration + talking-mouth energy animation + talking servo bob, serialized so answers are never dropped |
+| `piper_tts.py` | Piper neural-TTS engine wrapper (offline voice output) |
 | `robot_face.py` / `face_renderer.py` | The animated pygame face (2 selectable styles) |
 | `servo_module.py` | Servo control (simulation mode when `ENABLE_SERVOS=False`) |
 | `models/` | Emotion model architecture + weights *(weights downloaded separately — see §4)* |
@@ -134,6 +137,45 @@ ls models/emotion_raf_mobilenet_finetuned.pth
 
 Without it Luna still runs — face tracking and eye-follow keep working; only emotion detection is disabled (emotion stays *Neutral*) and a `[vision] Emotion model unavailable …` warning is printed until you add the weights.
 
+### 4c. Piper voice (TTS)
+
+Luna speaks with [**Piper**](https://github.com/rhasspy/piper), an offline neural TTS engine. It is **not** a pip package — it's a small prebuilt binary plus a voice model. The default paths in `config.py` target a Raspberry Pi where the user is `luna`:
+
+```python
+PIPER_PATH  = "/home/luna/piper/piper/piper"                     # the binary
+PIPER_MODEL = "/home/luna/piper/voices/en_US-lessac-medium.onnx" # the voice
+TTS_PLAYER  = "paplay"                                           # PulseAudio player
+```
+
+Install it (Raspberry Pi / Linux, 64-bit → `aarch64`; PC → `x86_64`):
+
+```bash
+mkdir -p /home/luna/piper && cd /home/luna/piper
+# 1) Piper binary — grab the latest asset for your arch from the releases page:
+#    https://github.com/rhasspy/piper/releases
+wget https://github.com/rhasspy/piper/releases/latest/download/piper_linux_aarch64.tar.gz
+tar -xzf piper_linux_aarch64.tar.gz          # → /home/luna/piper/piper/piper
+
+# 2) Voice model (.onnx + .onnx.json must sit together):
+mkdir -p /home/luna/piper/voices && cd /home/luna/piper/voices
+BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium
+wget $BASE/en_US-lessac-medium.onnx
+wget $BASE/en_US-lessac-medium.onnx.json
+```
+
+Verify Piper works on its own:
+
+```bash
+echo "Hello, I am Luna." | /home/luna/piper/piper/piper \
+    --model /home/luna/piper/voices/en_US-lessac-medium.onnx --output_file /tmp/t.wav
+paplay /tmp/t.wav      # you should hear it
+```
+
+**Different OS or paths?** Edit the three values above in `config.py` to match your system:
+- **Not on a Pi / different username** → point `PIPER_PATH` and `PIPER_MODEL` wherever you unpacked them.
+- **macOS** → use the macOS Piper build and set `TTS_PLAYER = "afplay"` (`paplay` is Linux/PulseAudio only).
+- **No Piper at all?** Luna doesn't crash — she prints each reply as text (`[Luna] …`) and everything else (face, vision, gestures, servos) keeps working. Voice just stays silent until Piper is set up.
+
 ---
 
 ## 5. API key setup
@@ -163,7 +205,7 @@ pip install -r requirements.txt
 
 Notes:
 - If `pip install` fails partway on a slow connection, just re-run the same `pip install -r requirements.txt` — pip resumes/skips already-installed packages.
-- TTS uses the built-in `say` command automatically if pyttsx3 fails.
+- Voice output uses **Piper** ([§4c](#4c-piper-voice-tts)) — set `TTS_PLAYER = "afplay"` in `config.py` for macOS. Without Piper configured, Luna prints replies as text instead of speaking; everything else still works.
 - macOS will ask for **Microphone** and **Camera** permission the first time — grant both (System Settings → Privacy & Security).
 - Servos run in simulation mode (`ENABLE_SERVOS = False`) — you'll see `[SERVO] ...` prints instead.
 - **If your shell also has conda's `(base)` environment active**, run `conda deactivate` *after* `source venv/bin/activate` so the venv's `python`/`pip` win on `PATH`. Verify with `which python3` — it must point inside `venv/bin/`.
@@ -178,7 +220,7 @@ pip install -r requirements.txt
 ```
 
 Notes:
-- pyttsx3 uses the built-in SAPI5 voices — no extra install needed.
+- Voice output uses **Piper** ([§4c](#4c-piper-voice-tts)) — download the Windows Piper build, then set `PIPER_PATH`, `PIPER_MODEL`, and a Windows-playable `TTS_PLAYER` in `config.py`. Without Piper configured, Luna prints replies as text; everything else still works.
 - If `sounddevice` install fails: `pip install pipwin && pipwin install pyaudio`, then retry.
 - Set the key with `setx GROQ_API_KEY "gsk_..."` **or** use the `.env` file (recommended).
 
@@ -209,7 +251,7 @@ More Pi-specific tuning (swap size, GPU split, performance governor) is in [pi_i
 - **More headroom for ML inference** — add `gpu_mem=128` to `/boot/config.txt` (Pi 4) or `/boot/firmware/config.txt` (Pi 5).
 - **Performance governor**: `echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`
 
-**Servos:** wire head-pan → GPIO 17, left arm → GPIO 18, right arm → GPIO 27 (BCM numbering, 50 Hz PWM), then set `ENABLE_SERVOS = True` in `config.py`.
+**Servos:** wire left arm → GPIO 18, right arm → GPIO 17 (BCM numbering, 50 Hz PWM), then set `ENABLE_SERVOS = True` in `config.py`. Head-pan → GPIO 27 is wired but currently disabled in code (hands only). Full wiring, power, and troubleshooting: [**SERVO_SETUP.md**](SERVO_SETUP.md).
 
 ---
 
@@ -225,7 +267,7 @@ On first run you should see startup logs for each subsystem (camera, vision mode
 **Sanity check before troubleshooting anything else** — run this once to confirm the environment itself is fine:
 
 ```bash
-python3 -c "import torch, cv2, mediapipe, pygame, pyttsx3, sounddevice, vosk, groq, sentence_transformers, deepface, tensorflow; print('ALL_OK')"
+python3 -c "import torch, cv2, mediapipe, pygame, sounddevice, vosk, groq, sentence_transformers, deepface, tensorflow; print('ALL_OK')"
 ```
 
 If that doesn't print `ALL_OK`, fix the import error first (usually a missed `pip install -r requirements.txt` step or wrong Python version) before trying to run Luna itself.
@@ -322,11 +364,12 @@ print('wrote /tmp/mictest.wav — play it back to confirm audio is present')
 
 ### 🔊 Speaker not found / no sound
 
-Luna never crashes on missing speakers — she prints the reply text instead.
+Luna never crashes on missing speakers or a missing Piper — she prints the reply text (`[Luna] …`) instead. If you see `[Piper] error: ...`, Piper isn't installed/configured — revisit [§4c](#4c-piper-voice-tts) and check `PIPER_PATH`, `PIPER_MODEL`, and `TTS_PLAYER` in `config.py`.
 
-- **Pi/Linux**: test with `speaker-test -t wav -c 2`. Install espeak if missing: `sudo apt install espeak`. Pick the right output: `sudo raspi-config` → System → Audio (or `alsamixer` → F6 to select the card, check nothing is muted `MM` → press M).
-- **macOS**: test with `say hello`. Check output device in System Settings → Sound.
-- **Windows**: check the default playback device in Settings → Sound; pyttsx3 uses it automatically.
+- **First, prove Piper works standalone** with the `echo … | piper … && paplay` test in [§4c](#4c-piper-voice-tts). If that's silent, it's an OS-audio or path issue, not a Luna bug.
+- **Pi/Linux**: confirm the OS can play audio at all: `speaker-test -t wav -c 2`. Pick the right output: `sudo raspi-config` → System → Audio (or `alsamixer` → F6 to select the card, check nothing is muted `MM` → press M). Ensure the `TTS_PLAYER` you set (`paplay` for PulseAudio/PipeWire, or `aplay` for raw ALSA) actually exists: `which paplay aplay`.
+- **macOS**: test OS audio with `say hello`; set `TTS_PLAYER = "afplay"` in `config.py`. Check the output device in System Settings → Sound.
+- **Windows**: check the default playback device in Settings → Sound, and set a Windows-playable `TTS_PLAYER`.
 - HDMI screens on the Pi often steal audio — force the headphone jack: `amixer cset numid=3 1` (or select in raspi-config).
 
 ### 📷 Camera not found
@@ -382,7 +425,7 @@ Lower `VISION_FPS`, `GESTURE_FPS`, `RENDER_FPS` in `config.py`; see [pi_inst.txt
 | Vosk fails to load / `Model path does not exist` | The Vosk model folder isn't named exactly `vosk-model-small-en-us-0.15` or isn't in the project root — re-check [§4a](#4a-vosk-speech-model). |
 | `pygame.error: No available video device` (Pi headless / SSH) | Luna needs a display. Run with a physical monitor attached, or over VNC/X-forwarding, or set `SDL_VIDEODRIVER=dummy` if you only want to test non-visual behavior. |
 | Install hangs/fails on `mediapipe` (Raspberry Pi) | Use the Pi-specific wheel — see the [Raspberry Pi setup](#raspberry-pi-4--5-64-bit-os-recommended) section above. |
-| `ReferenceError: weakly-referenced object no longer exists` from pyttsx3 | Already handled — `text_to_speech.py` keeps a persistent engine and falls back to `say`/`espeak` automatically. If you still see it, check you're on an unmodified copy of `text_to_speech.py`. |
+| `[Piper] error: ...` printed, no voice (text still shows) | Piper isn't installed or the paths are wrong — see [§4c](#4c-piper-voice-tts). Check `PIPER_PATH`/`PIPER_MODEL` exist and `TTS_PLAYER` is installed (`which paplay`). Luna keeps running; only audio is affected. |
 | Gestures/wave never seem to trigger a spoken reply | Expected if Luna is already mid-answer or in an active conversation window — gestures react with face + servo only in that case so they never talk over you (see [§8](#8-using-luna)). |
 
 ---

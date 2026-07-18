@@ -4,10 +4,12 @@ servo_module.py — Luna servo controller.
 ENABLE_SERVOS = False  → silent simulation mode (Mac / dev)
 ENABLE_SERVOS = True   → real GPIO PWM on Pi
 
-GPIO pins (BCM numbering):
-  HEAD_PAN  → GPIO 17
+GPIO pins (BCM numbering) — these constants are the single source of truth;
+the wiring docs (README, SERVO_SETUP.md) match them. If you wire differently,
+change PIN_* below and the docs' pin numbers accordingly.
+  HEAD_PAN  → GPIO 27   (currently disabled in code — hands only)
   LEFT_ARM  → GPIO 18
-  RIGHT_ARM → GPIO 27
+  RIGHT_ARM → GPIO 17
 """
 
 import math
@@ -44,10 +46,11 @@ def angle_to_duty(angle):
 class ServoController:
 
     def __init__(self):
-        self.running       = True
-        self._queue        = []
-        self._lock         = threading.Lock()
-        self._talking      = False   # drives the subtle talking bob
+        self.running         = True
+        self._queue          = []
+        self._lock           = threading.Lock()
+        self._talking        = False   # drives the subtle talking bob
+        self._action_running = False   # a queued gesture is mid-motion
 
         if RPI:
             GPIO.setmode(GPIO.BCM)
@@ -95,7 +98,13 @@ class ServoController:
                 if self._queue:
                     action = self._queue.pop(0)
             if action:
-                action()
+                # flag the gesture as running so the talking bob yields the
+                # arms while it moves (no two threads driving one servo).
+                self._action_running = True
+                try:
+                    action()
+                finally:
+                    self._action_running = False
             else:
                 time.sleep(0.05)
 
@@ -115,7 +124,12 @@ class ServoController:
         moving   = False
 
         while self.running:
-            if self._talking and ENABLE_SERVOS:
+            # A queued gesture (wave / arm_up / arms_up) owns the arms while it
+            # runs — pause the bob so two threads never drive the same servo at
+            # once (which jitters/strains it on real hardware).
+            gesture_busy = self._action_running or bool(self._queue)
+
+            if self._talking and ENABLE_SERVOS and not gesture_busy:
                 moving   = True
                 phase   += INC
                 off      = AMPL * math.sin(phase)
@@ -123,6 +137,13 @@ class ServoController:
                 self._set_angle(self.pwm_right, REST + off, "right_arm")
                 last_off = off
                 time.sleep(STEP)
+            elif self._talking and gesture_busy:
+                # still talking, but a gesture is moving the arms — don't touch
+                # the servos; resume the bob cleanly from rest once it finishes.
+                phase    = 0.0
+                last_off = 0.0
+                moving   = False
+                time.sleep(0.03)
             else:
                 if moving and ENABLE_SERVOS:
                     # ease both arms symmetrically back to rest
@@ -231,8 +252,14 @@ class ServoController:
         self.queue(_do)
 
     def cleanup(self):
-        self.running = False
+        self.running  = False
+        self._talking = False
         if RPI:
+            # return everything to centre (90°) so nothing is left frozen
+            # mid-gesture, give the servos a moment to travel, then release.
+            for pwm in [self.pwm_head, self.pwm_left, self.pwm_right]:
+                self._set_angle(pwm, 90, "center")
+            time.sleep(0.4)
             for pwm in [self.pwm_head, self.pwm_left, self.pwm_right]:
                 pwm.stop()
             GPIO.cleanup()
